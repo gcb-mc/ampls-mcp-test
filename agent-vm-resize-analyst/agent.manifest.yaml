@@ -1,0 +1,29 @@
+name: vm-resize-analyst-agent
+description: >
+  A multi-agent orchestrator that calls the monitor-recommendations-agent for
+  Azure Monitor data, then analyzes VM metrics to provide actionable resize
+  recommendations with cost and performance tradeoffs.
+metadata:
+  tags:
+    - Agent Framework
+    - Multi-Agent
+    - Azure Monitor
+    - VM Resize
+    - Cost Optimization
+template:
+  name: vm-resize-analyst-agent
+  kind: hosted
+  protocols:
+    - protocol: responses
+      version: 1.0.0
+  environment_variables:
+    - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+      value: "{{AZURE_AI_MODEL_DEPLOYMENT_NAME}}"
+    - name: AZURE_SUBSCRIPTION_ID
+      value: "{{AZURE_SUBSCRIPTION_ID}}"
+    - name: MONITOR_AGENT_NAME
+      value: "{{MONITOR_AGENT_NAME}}"
+resources:
+  - kind: model
+    id: gpt-4.1-mini
+    name: AZURE_AI_MODEL_DEPLOYMENT_NAME
