@@ -1,0 +1,6 @@
+agent-framework>=1.1.1
+agent-framework-foundry-hosting
+azure-identity
+azure-mgmt-advisor
+azure-mgmt-monitor
+python-dotenv
