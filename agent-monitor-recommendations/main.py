@@ -126,7 +126,7 @@ def get_monitor_metrics(
         kwargs = {
             "resource_uri": resource_id,
             "timespan": timespan,
-            "interval": timedelta(hours=1),
+            "interval": "PT1H",
             "aggregation": "Average,Maximum,Minimum",
         }
         if metric_names:
