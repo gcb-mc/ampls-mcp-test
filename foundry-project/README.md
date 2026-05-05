@@ -1,6 +1,6 @@
-# Azure AI Foundry Project Setup
+# Microsoft Foundry Project Setup
 
-This directory is where you initialize the Azure AI Foundry project using `azd`.
+This directory is where you initialize the Microsoft Foundry project using `azd`.
 
 ## Steps
 
@@ -31,8 +31,8 @@ This takes approximately 5 minutes and creates:
 
 | Resource | Purpose |
 |----------|---------|
-| AI Foundry Account | Parent account for projects |
-| AI Foundry Project | Workspace for agents and models |
+| Microsoft Foundry Account | Parent account for projects |
+| Microsoft Foundry Project | Workspace for agents and models |
 | Container Registry | Stores hosted agent container images |
 | Capability Host | Runtime for hosted agents |
 | Application Insights | Project-level telemetry |
@@ -51,7 +51,7 @@ Key values to note:
 
 ### 5. Verify in portal
 
-- [AI Foundry Portal](https://ai.azure.com) — manage agents and models
+- [Microsoft Foundry Portal](https://ai.azure.com) — manage agents and models
 - [Azure Portal](https://portal.azure.com) — view resources and diagnostics
 
 ## Next Steps
