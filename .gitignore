@@ -11,4 +11,11 @@ Thumbs.db
 # Agent secrets
 agent-monitor-recommendations/.env
 agent-monitor-recommendations/.venv/
+agent-vm-resize-analyst/.env
+agent-vm-resize-analyst/.venv/
 **/__pycache__/
+
+# Notebook artifacts
+agent-evaluation-checklist-output.ipynb
+.ipynb_checkpoints/
+fix_notebook.py

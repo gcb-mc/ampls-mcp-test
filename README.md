@@ -98,6 +98,8 @@ Once Sub B deploys the AMPLS private endpoint:
 ```
 ampls-mcp-test/
 ├── README.md                        # This file
+├── .github/
+│   └── copilot-instructions.md     # Lessons learned & patterns for hosted agents
 ├── infra/
 │   ├── subA-observability.bicep     # Subscription-level Bicep (creates RG + resources)
 │   └── modules/
@@ -106,9 +108,96 @@ ampls-mcp-test/
 │   └── deploy-subA.ps1              # Deployment script for Sub A
 ├── foundry-project/
 │   └── README.md                    # Instructions for Foundry project setup
-└── outputs/
-    └── .gitkeep                     # Placeholder (actual outputs are gitignored)
+├── agent-monitor-recommendations/   # Hosted agent: Azure Monitor & Advisor data collector
+│   ├── main.py                      # 5 tools (list_vms, get_monitor_metrics, etc.)
+│   ├── Dockerfile                   # Python 3.12-slim container
+│   ├── requirements.txt
+│   └── README.md
+├── agent-vm-resize-analyst/         # Hosted agent: VM resize analysis & cost comparison
+│   ├── main.py                      # 6 tools (list_vms, get_monitor_metrics, get_advisor_recommendations, get_available_vm_skus, get_vm_resize_options, estimate_cost_comparison)
+│   ├── Dockerfile
+│   ├── agent.yaml                   # Hosted agent config (CPU/memory)
+│   ├── agent.manifest.yaml          # Foundry registration manifest
+│   ├── .foundry/agent-metadata.yaml # Dev environment metadata
+│   ├── .env.example
+│   └── README.md
+├── agent-evaluation-checklist.ipynb  # Reusable Jupyter notebook for agent validation
+├── outputs/
+│   └── .gitkeep                     # Placeholder (actual outputs are gitignored)
+└── .gitignore
 ```
+
+## Hosted Agents
+
+This repo includes two Azure AI Foundry hosted agents that work together to help users analyze and resize VMs:
+
+### agent-monitor-recommendations (v4)
+Collects Azure Monitor metrics, activity logs, alerts, and Advisor recommendations. Deployed as a hosted agent container in ACR.
+
+**Tools:** `list_vms`, `get_monitor_metrics`, `get_monitor_alerts`, `get_activity_log`, `get_advisor_recommendations`
+
+### agent-vm-resize-analyst (v2)
+Analyzes VM metrics and recommendations to provide resize options with cost comparisons. Embeds monitor tools directly for self-contained operation.
+
+**Tools:** `list_vms`, `get_monitor_metrics`, `get_advisor_recommendations`, `get_available_vm_skus`, `get_vm_resize_options`, `estimate_cost_comparison`
+
+### Deployment
+
+```powershell
+# Build and push to ACR
+az acr build --registry cruxluiilsxlu4w --image <agent-name>:latest ./agent-<folder>/
+
+# Register/update agent version via Python SDK (see agent README for details)
+```
+
+### Required RBAC for Agent Identities
+
+| Role | Scope | Purpose |
+|------|-------|---------|
+| Reader | Subscription | List VMs, SKUs, Advisor recommendations |
+| Monitoring Reader | Subscription | Query Azure Monitor metrics |
+| Azure AI Developer | AI Services account | Agent-to-agent communication (if needed) |
+| Cognitive Services User | AI Services account | Foundry API access |
+
+---
+
+## Agent Evaluation Checklist
+
+A reusable Jupyter notebook (`agent-evaluation-checklist.ipynb`) to validate any hosted agent across 5 areas:
+
+| Section | What it tests |
+|---------|---------------|
+| 1️⃣ Infrastructure | ACR image exists, agent registered, version active |
+| 2️⃣ Identity & RBAC | Managed identity has all required role assignments |
+| 3️⃣ Tool Connectivity | Each tool's backend API (Compute, Monitor, Advisor, Pricing) is reachable |
+| 4️⃣ Tool Selection | LLM picks the correct tool for test prompts (accuracy %) |
+| 5️⃣ End-to-End | Full agent response via deployed endpoint |
+
+### Running the Evaluation Locally
+
+```powershell
+# Install dependencies
+pip install jupyter azure-identity azure-ai-projects azure-mgmt-compute azure-mgmt-monitor azure-mgmt-advisor
+
+# Make sure you're logged in
+az login
+
+# Option 1: Run in browser
+python -m notebook agent-evaluation-checklist.ipynb
+
+# Option 2: Run headless and get output
+python -m nbconvert --to notebook --execute agent-evaluation-checklist.ipynb --output results.ipynb
+```
+
+### Customizing for a Different Agent
+
+Edit the `AGENT_CONFIG` cell at the top of the notebook:
+- `agent_name` — your agent's registered name
+- `expected_tools` — list of tool function names
+- `required_roles` — RBAC roles to validate
+- `tool_selection_tests` — (prompt, expected_tool) pairs
+
+---
 
 ## Customization
 
