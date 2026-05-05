@@ -164,9 +164,9 @@ def get_monitor_metrics(
     try:
         monitor_client = MonitorManagementClient(_get_obo_credential(), SUBSCRIPTION_ID)
 
-        end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(hours=time_range_hours)
-        timespan = f"{start_time.isoformat()}/{end_time.isoformat()}"
+        # Use ISO 8601 duration format so Azure determines the time window
+        # server-side, avoiding issues with incorrect local system clocks.
+        timespan = f"PT{time_range_hours}H"
 
         kwargs = {
             "resource_uri": resource_id,
@@ -220,10 +220,12 @@ def get_activity_log(
     try:
         monitor_client = MonitorManagementClient(_get_obo_credential(), SUBSCRIPTION_ID)
 
+        # Use ISO 8601 duration to let Azure compute the time window server-side,
+        # avoiding issues with incorrect local system clocks.
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=time_range_hours)
 
-        filter_str= f"eventTimestamp ge '{start_time.isoformat()}' and eventTimestamp le '{end_time.isoformat()}'"
+        filter_str = f"eventTimestamp ge '{start_time.isoformat()}'"
         if resource_group:
             filter_str += f" and resourceGroupName eq '{resource_group}'"
 
