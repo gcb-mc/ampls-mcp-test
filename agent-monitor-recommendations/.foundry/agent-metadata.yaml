@@ -1,0 +1,5 @@
+defaultEnvironment: dev
+environments:
+  dev:
+    projectEndpoint: https://ai-account-uxluiilsxlu4w.services.ai.azure.com/api/projects/ai-project-ampls-foundry-test02
+    agentName: monitor-recommendations-agent
