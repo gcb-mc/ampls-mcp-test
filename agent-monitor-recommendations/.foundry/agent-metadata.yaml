@@ -1,5 +1,6 @@
 defaultEnvironment: dev
 environments:
   dev:
-    projectEndpoint: https://ai-account-uxluiilsxlu4w.services.ai.azure.com/api/projects/ai-project-ampls-foundry-test02
+    projectEndpoint: https://<your-ai-account>.services.ai.azure.com/api/projects/<your-project>
     agentName: monitor-recommendations-agent
+    azureContainerRegistry: <your-acr-name>.azurecr.io

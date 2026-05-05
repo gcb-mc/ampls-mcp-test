@@ -53,14 +53,100 @@ The agent starts on `http://localhost:8088`. Send requests to `POST http://local
 
 ### Deploy to Foundry
 
-```bash
-# Build container (must be linux/amd64)
-docker build --platform linux/amd64 -t monitor-recommendations-agent .
+#### 1. Build & Push Image (ACR Cloud Build — recommended)
 
-# Tag and push to your ACR
-docker tag monitor-recommendations-agent <your-acr>.azurecr.io/monitor-recommendations-agent:latest
+```bash
+cd agent-monitor-recommendations
+
+az acr build \
+  --registry <your-acr-name> \
+  --resource-group <your-rg> \
+  --image monitor-recommendations-agent:latest \
+  --platform linux/amd64 .
+```
+
+Or with local Docker:
+
+```bash
+docker build --platform linux/amd64 -t <your-acr>.azurecr.io/monitor-recommendations-agent:latest .
+az acr login --name <your-acr>
 docker push <your-acr>.azurecr.io/monitor-recommendations-agent:latest
 ```
+
+#### 2. Register the Agent in Foundry
+
+```python
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+
+client = AIProjectClient(
+    endpoint="<your-project-endpoint>",
+    credential=DefaultAzureCredential(),
+    allow_preview=True
+)
+
+client.agents.create_version(
+    agent_name="monitor-recommendations-agent",
+    definition={
+        "kind": "hosted",
+        "image": "<your-acr>.azurecr.io/monitor-recommendations-agent:latest",
+        "cpu": "1",
+        "memory": "2Gi",
+        "container_protocol_versions": [{"protocol": "responses", "version": "1.0.0"}],
+        "environment_variables": {
+            "AZURE_AI_MODEL_DEPLOYMENT_NAME": "gpt-4.1-mini",
+            "AZURE_SUBSCRIPTION_ID": "<your-subscription-id>"
+        }
+    },
+    description="Azure Monitor Recommendations Agent"
+)
+```
+
+> **Note:** `FOUNDRY_PROJECT_ENDPOINT` is automatically injected by the platform — do not include it in `environment_variables`.
+
+#### 3. Assign RBAC (Required)
+
+The agent's managed identity needs these roles to access Azure Monitor and Advisor data:
+
+| Role | Scope | Purpose |
+|------|-------|---------|
+| **Azure AI User** | AI Services account | Invoke LLM models |
+| **AcrPull** | Container Registry | Pull container image |
+| **Monitoring Reader** | Target subscription | Read metrics, alerts, activity logs |
+| **Reader** | Target subscription | Read Advisor recommendations |
+
+```bash
+# Get the agent's principal ID from the create_version response (instance_identity.principal_id)
+AGENT_PRINCIPAL_ID=<from-agent-response>
+SUBSCRIPTION_ID=<your-subscription-id>
+AI_ACCOUNT_ID=<your-ai-services-resource-id>
+ACR_ID=<your-acr-resource-id>
+
+# LLM access
+az role assignment create --assignee-object-id $AGENT_PRINCIPAL_ID \
+  --assignee-principal-type ServicePrincipal \
+  --role "Azure AI User" --scope $AI_ACCOUNT_ID
+
+# ACR pull
+az role assignment create --assignee-object-id $AGENT_PRINCIPAL_ID \
+  --assignee-principal-type ServicePrincipal \
+  --role "AcrPull" --scope $ACR_ID
+
+# Monitor & Advisor access
+az role assignment create --assignee-object-id $AGENT_PRINCIPAL_ID \
+  --assignee-principal-type ServicePrincipal \
+  --role "Monitoring Reader" --scope /subscriptions/$SUBSCRIPTION_ID
+
+az role assignment create --assignee-object-id $AGENT_PRINCIPAL_ID \
+  --assignee-principal-type ServicePrincipal \
+  --role "Reader" --scope /subscriptions/$SUBSCRIPTION_ID
+```
+
+> **Important:** Also assign the same roles to the **blueprint identity** (from the agent response `blueprint.principal_id`).
+
+#### 4. Wait & Test
+
+RBAC propagation takes 2–5 minutes. Then test in the [Foundry Playground](https://ai.azure.com) or via the SDK.
 
 ## Example Prompts
 

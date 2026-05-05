@@ -8,4 +8,7 @@ outputs/*.json
 .DS_Store
 Thumbs.db
 
+# Agent secrets
 agent-monitor-recommendations/.env
+agent-monitor-recommendations/.venv/
+**/__pycache__/
