@@ -1,6 +1,6 @@
-# Azure AI Foundry Hosted Agents — Reference Architecture
+# Microsoft Foundry Hosted Agents — Reference Architecture
 
-A hands-on reference repo demonstrating how **GitHub Copilot**, **Azure AI Foundry**, **Hosted Agents**, and **MCP (Model Context Protocol) tool connections** work together to build production AI agent systems on Azure.
+A hands-on reference repo demonstrating how **GitHub Copilot**, **Microsoft Foundry**, **Hosted Agents**, and **MCP (Model Context Protocol) tool connections** work together to build production AI agent systems on Azure.
 
 Built as a learning accelerator for teams adopting agent-based architectures with Azure infrastructure.
 
@@ -11,7 +11,7 @@ Built as a learning accelerator for teams adopting agent-based architectures wit
 | Concept | What you'll learn |
 |---------|-------------------|
 | **GitHub Copilot** | Used as the AI pair-programmer to build, debug, and iterate on agents in real time |
-| **Azure AI Foundry** | The platform for hosting, managing, and scaling AI agents with built-in identity & observability |
+| **Microsoft Foundry** | The platform for hosting, managing, and scaling AI agents with built-in identity & observability |
 | **Hosted Agents** | Containerized agent applications with managed identity, auto-scaling, and tool execution |
 | **Agent Framework** | Python-based tool registration, LLM orchestration, and the Responses protocol |
 | **MCP Connections** | How agents connect to Azure services (Monitor, Compute, Advisor) as tool backends |
@@ -29,8 +29,8 @@ graph TB
         Portal[Foundry Portal / Chat UI]
     end
 
-    subgraph Foundry["Azure AI Foundry Platform"]
-        Project[AI Foundry Project]
+    subgraph Foundry["Microsoft Foundry Platform"]
+        Project[Microsoft Foundry Project]
         LLM[GPT-4.1-mini Deployment]
         AgentRuntime[Hosted Agent Runtime]
         
@@ -101,7 +101,7 @@ GitHub Copilot acts as the development accelerator. It was used to:
 
 The `.github/copilot-instructions.md` file captures all lessons learned, so Copilot retains context across sessions.
 
-### 2. Azure AI Foundry → Agent Hosting
+### 2. Microsoft Foundry → Agent Hosting
 
 Foundry provides the managed platform for running agents:
 - **Project** — logical container for agents, models, and connections
