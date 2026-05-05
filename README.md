@@ -129,7 +129,7 @@ ampls-mcp-test/
 
 ## Hosted Agents
 
-This repo includes two Azure AI Foundry hosted agents that work together to help users analyze and resize VMs:
+This repo includes two Microsoft Foundry hosted agents that work together to help users analyze and resize VMs:
 
 ### agent-monitor-recommendations (v4)
 Collects Azure Monitor metrics, activity logs, alerts, and Advisor recommendations. Deployed as a hosted agent container in ACR.
