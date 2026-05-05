@@ -1,7 +1,8 @@
 agent-framework>=1.1.1
 agent-framework-foundry-hosting
 azure-identity
-azure-ai-projects>=2.0.0
+azure-mgmt-advisor
 azure-mgmt-compute
+azure-mgmt-monitor
 python-dotenv
 requests

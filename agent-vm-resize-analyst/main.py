@@ -3,13 +3,15 @@
 import os
 import json
 import requests
+from datetime import datetime, timedelta, timezone
 
 from agent_framework import Agent, tool
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_foundry_hosting import ResponsesHostServer
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
-from azure.ai.projects import AIProjectClient
+from azure.mgmt.monitor import MonitorManagementClient
+from azure.mgmt.advisor import AdvisorManagementClient
 from dotenv import load_dotenv
 from pydantic import Field
 from typing_extensions import Annotated
@@ -17,55 +19,162 @@ from typing_extensions import Annotated
 load_dotenv(override=False)
 
 SUBSCRIPTION_ID = os.environ.get("AZURE_SUBSCRIPTION_ID", "")
-MONITOR_AGENT_NAME = os.environ.get("MONITOR_AGENT_NAME", "monitor-recommendations-agent")
 PROJECT_ENDPOINT = os.environ.get("FOUNDRY_PROJECT_ENDPOINT", "")
 
 credential = DefaultAzureCredential()
 
 
+# ─── Data Gathering Tools (from monitor-recommendations-agent) ───────────────
+
 @tool(approval_mode="never_require")
-def call_monitor_agent(
-    query: Annotated[
+def list_vms(
+    resource_group: Annotated[
         str,
         Field(
-            description="Natural language query to send to the monitor-recommendations-agent. "
-            "Examples: 'list all VMs', 'get CPU and memory metrics for VM myvm in resource group myrg', "
-            "'show Advisor recommendations for cost optimization'."
+            description="Optional resource group name to filter VMs. Leave empty to list all VMs in the subscription."
         ),
-    ],
+    ] = "",
 ) -> str:
-    """Invoke the monitor-recommendations-agent to gather Azure Monitor data, VM inventory, metrics, or Advisor recommendations. Use this tool to collect raw data before performing analysis."""
+    """List virtual machines in the subscription (or a specific resource group). Returns VM name, resource group, location, size, OS type, and resource ID."""
     try:
-        client = AIProjectClient(endpoint=PROJECT_ENDPOINT, credential=credential)
+        compute_client = ComputeManagementClient(credential, SUBSCRIPTION_ID)
 
-        # Create a thread and run the monitor agent
-        thread = client.agents.threads.create()
-        client.agents.messages.create(
-            thread_id=thread.id,
-            role="user",
-            content=query,
-        )
+        if resource_group:
+            vms_iter = compute_client.virtual_machines.list(resource_group)
+        else:
+            vms_iter = compute_client.virtual_machines.list_all()
 
-        run = client.agents.runs.create_and_process(
-            thread_id=thread.id,
-            agent_id=MONITOR_AGENT_NAME,
-            headers={"Foundry-Features": "HostedAgents=V1Preview"},
-        )
+        vm_list = []
+        for vm in vms_iter:
+            rg = vm.id.split("/resourceGroups/")[1].split("/")[0] if vm.id else "N/A"
 
-        if run.status != "completed":
-            return f"Monitor agent run failed with status: {run.status}. Error: {getattr(run, 'last_error', 'unknown')}"
+            vm_info = {
+                "name": vm.name,
+                "resource_group": rg,
+                "location": vm.location,
+                "vm_size": vm.hardware_profile.vm_size if vm.hardware_profile else "N/A",
+                "os_type": vm.storage_profile.os_disk.os_type if vm.storage_profile and vm.storage_profile.os_disk else "N/A",
+                "resource_id": vm.id,
+            }
 
-        # Get the agent's response
-        messages = client.agents.messages.list(thread_id=thread.id)
-        for msg in messages:
-            if msg.role == "assistant":
-                text_parts = [block.text.value for block in msg.content if hasattr(block, "text")]
-                if text_parts:
-                    return "\n".join(text_parts)
+            if vm.instance_view and vm.instance_view.statuses:
+                power_states = [s.display_status for s in vm.instance_view.statuses if s.code and s.code.startswith("PowerState/")]
+                vm_info["power_state"] = power_states[0] if power_states else "Unknown"
+            else:
+                vm_info["power_state"] = "Unknown (use Azure Portal or request instance view)"
 
-        return "Monitor agent returned no response."
+            vm_list.append(vm_info)
+            if len(vm_list) >= 50:
+                break
+
+        if not vm_list:
+            scope = f"resource group '{resource_group}'" if resource_group else f"subscription {SUBSCRIPTION_ID}"
+            return f"No virtual machines found in {scope}."
+
+        return json.dumps(vm_list, indent=2)
     except Exception as e:
-        return f"Error calling monitor agent: {str(e)}"
+        return f"Error listing VMs: {str(e)}"
+
+
+@tool(approval_mode="never_require")
+def get_monitor_metrics(
+    resource_id: Annotated[
+        str,
+        Field(description="The full Azure resource ID to query metrics for."),
+    ],
+    metric_names: Annotated[
+        str,
+        Field(
+            description="Comma-separated metric names to query (e.g., 'Percentage CPU,Available Memory Bytes')."
+        ),
+    ] = "",
+    time_range_hours: Annotated[
+        int, Field(description="How many hours back to query metrics. Default is 24.")
+    ] = 24,
+) -> str:
+    """Get Azure Monitor metrics for a specific resource. Returns metric values over the specified time range."""
+    try:
+        monitor_client = MonitorManagementClient(credential, SUBSCRIPTION_ID)
+
+        timespan = f"PT{time_range_hours}H"
+        kwargs = {
+            "resource_uri": resource_id,
+            "timespan": timespan,
+            "interval": "PT1H",
+            "aggregation": "Average,Maximum,Minimum",
+        }
+        if metric_names:
+            kwargs["metricnames"] = metric_names
+
+        metrics_data = monitor_client.metrics.list(**kwargs)
+
+        results = []
+        for metric in metrics_data.value:
+            metric_result = {
+                "name": metric.name.value,
+                "unit": metric.unit,
+                "timeseries": [],
+            }
+            for ts in metric.timeseries:
+                for data_point in ts.data[-5:]:
+                    metric_result["timeseries"].append(
+                        {
+                            "timestamp": data_point.time_stamp.isoformat() if data_point.time_stamp else "N/A",
+                            "average": data_point.average,
+                            "maximum": data_point.maximum,
+                            "minimum": data_point.minimum,
+                        }
+                    )
+            results.append(metric_result)
+
+        if not results:
+            return f"No metrics found for resource: {resource_id}"
+
+        return json.dumps(results, indent=2)
+    except Exception as e:
+        return f"Error fetching metrics: {str(e)}"
+
+
+@tool(approval_mode="never_require")
+def get_advisor_recommendations(
+    category: Annotated[
+        str,
+        Field(
+            description="Filter by category: Cost, Performance, Reliability, Security, OperationalExcellence, or 'all' for everything."
+        ),
+    ] = "all",
+) -> str:
+    """Get Azure Advisor recommendations for the configured subscription."""
+    try:
+        advisor_client = AdvisorManagementClient(credential, SUBSCRIPTION_ID)
+        recommendations = []
+
+        for rec in advisor_client.recommendations.list():
+            rec_category = rec.category if rec.category else "Unknown"
+            if category.lower() != "all" and rec_category.lower() != category.lower():
+                continue
+
+            recommendations.append(
+                {
+                    "name": rec.short_description.problem if rec.short_description else "N/A",
+                    "solution": rec.short_description.solution if rec.short_description else "N/A",
+                    "category": rec_category,
+                    "impact": rec.impact if rec.impact else "Unknown",
+                    "resource_id": rec.resource_metadata.resource_id if rec.resource_metadata else "N/A",
+                }
+            )
+            if len(recommendations) >= 25:
+                break
+
+        if not recommendations:
+            return f"No Advisor recommendations found for category '{category}'."
+
+        return json.dumps(recommendations, indent=2)
+    except Exception as e:
+        return f"Error fetching Advisor recommendations: {str(e)}"
+
+
+# ─── Analysis Tools (VM resize specific) ─────────────────────────────────────
 
 
 @tool(approval_mode="never_require")
@@ -233,15 +342,15 @@ def estimate_cost_comparison(
 
 AGENT_INSTRUCTIONS = """You are a VM Resize Analyst Agent. You help users determine the best VM size for their workloads by analyzing current metrics and providing actionable resize recommendations.
 
-## Your Multi-Agent Workflow:
-1. **Data Gathering** — Use `call_monitor_agent` to invoke the monitor-recommendations-agent for:
-   - VM inventory (names, current sizes, resource groups)
-   - CPU and memory metrics for target VMs
-   - Azure Advisor resize recommendations
-2. **Analysis** — Use your own tools to:
-   - List available resize targets for specific VMs (`get_vm_resize_options`)
-   - Compare VM SKU specs (`get_available_vm_skus`)
-   - Estimate cost differences (`estimate_cost_comparison`)
+## Your Workflow:
+1. **Data Gathering** — Use your monitoring tools to collect data:
+   - `list_vms` — Get VM inventory (names, current sizes, resource groups)
+   - `get_monitor_metrics` — Get CPU and memory metrics for target VMs
+   - `get_advisor_recommendations` — Get Advisor resize/cost recommendations
+2. **Analysis** — Use your resize analysis tools:
+   - `get_vm_resize_options` — List valid resize targets for a specific VM
+   - `get_available_vm_skus` — Compare VM SKU specs in a region
+   - `estimate_cost_comparison` — Get pricing difference between SKUs
 3. **Recommendation** — Synthesize findings into clear options for the user.
 
 ## How to Analyze:
@@ -266,7 +375,7 @@ Present recommendations as a structured comparison:
 | Upsize | ... | ... | ... | +$XX/mo | If growth expected |
 
 ## Guidelines:
-- Always start by calling the monitor agent to list VMs and get their metrics.
+- Always start by listing VMs, then get metrics for each.
 - For resize recommendations, always check what sizes are actually available for that specific VM (hardware constraints).
 - Include cost impact in every recommendation.
 - If Advisor already has a resize recommendation, highlight it and validate with metrics.
@@ -285,7 +394,7 @@ def main():
     agent = Agent(
         client=client,
         instructions=AGENT_INSTRUCTIONS,
-        tools=[call_monitor_agent, get_available_vm_skus, get_vm_resize_options, estimate_cost_comparison],
+        tools=[list_vms, get_monitor_metrics, get_advisor_recommendations, get_available_vm_skus, get_vm_resize_options, estimate_cost_comparison],
         default_options={"store": False},
     )
 
