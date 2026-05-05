@@ -1,0 +1,9 @@
+# Deployment outputs (contain subscription-specific IDs)
+outputs/*.json
+
+# Azure Developer CLI
+.azure/
+
+# OS files
+.DS_Store
+Thumbs.db
