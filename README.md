@@ -1,225 +1,358 @@
-# AMPLS + Microsoft Foundry Observability Setup
+# Azure AI Foundry Hosted Agents — Reference Architecture
 
-This repo provides Bicep templates and scripts to deploy a cross-subscription observability stack with Azure Monitor Private Link Scope (AMPLS) for Foundry projects.
+A hands-on reference repo demonstrating how **GitHub Copilot**, **Azure AI Foundry**, **Hosted Agents**, and **MCP (Model Context Protocol) tool connections** work together to build production AI agent systems on Azure.
 
-## Architecture Overview
+Built as a learning accelerator for teams adopting agent-based architectures with Azure infrastructure.
+
+---
+
+## What This Repo Demonstrates
+
+| Concept | What you'll learn |
+|---------|-------------------|
+| **GitHub Copilot** | Used as the AI pair-programmer to build, debug, and iterate on agents in real time |
+| **Azure AI Foundry** | The platform for hosting, managing, and scaling AI agents with built-in identity & observability |
+| **Hosted Agents** | Containerized agent applications with managed identity, auto-scaling, and tool execution |
+| **Agent Framework** | Python-based tool registration, LLM orchestration, and the Responses protocol |
+| **MCP Connections** | How agents connect to Azure services (Monitor, Compute, Advisor) as tool backends |
+| **AMPLS (Private Link)** | Secure, private observability pipeline across subscriptions |
+| **Evaluation** | Reusable Jupyter notebook for testing any hosted agent end-to-end |
+
+---
+
+## Architecture
+
+```mermaid
+graph TB
+    subgraph User["👤 User"]
+        Copilot[GitHub Copilot]
+        Portal[Foundry Portal / Chat UI]
+    end
+
+    subgraph Foundry["Azure AI Foundry Platform"]
+        Project[AI Foundry Project]
+        LLM[GPT-4.1-mini Deployment]
+        AgentRuntime[Hosted Agent Runtime]
+        
+        subgraph Agents["Hosted Agent Containers"]
+            MonitorAgent["🤖 monitor-recommendations-agent\n5 tools | v4"]
+            ResizeAgent["🤖 vm-resize-analyst-agent\n6 tools | v2"]
+        end
+    end
+
+    subgraph Azure["Azure Resource APIs (MCP Tool Backends)"]
+        Compute[Azure Compute API\nVMs, SKUs, Resize Options]
+        Monitor[Azure Monitor API\nMetrics, Alerts, Activity Logs]
+        Advisor[Azure Advisor API\nRecommendations]
+        Pricing[Azure Retail Prices API\nCost Comparison]
+    end
+
+    subgraph Identity["Identity & Security"]
+        MI[Managed Identity\nper agent version]
+        RBAC[RBAC Roles\nReader + Monitoring Reader]
+    end
+
+    subgraph Infra["Observability (AMPLS)"]
+        LAW[Log Analytics Workspace]
+        AppInsights[Application Insights]
+        AMPLS[Private Link Scope]
+    end
+
+    subgraph Registry["Container Registry"]
+        ACR[Azure Container Registry\nAgent Images]
+    end
+
+    Copilot -->|"builds & debugs"| Agents
+    Portal -->|"sends prompts"| AgentRuntime
+    AgentRuntime -->|"routes to"| Agents
+    Agents -->|"calls LLM"| LLM
+    LLM -->|"returns tool_calls"| Agents
+    
+    MonitorAgent -->|"DefaultAzureCredential"| MI
+    ResizeAgent -->|"DefaultAzureCredential"| MI
+    MI -->|"authorized by"| RBAC
+    
+    ResizeAgent --> Compute
+    ResizeAgent --> Monitor
+    ResizeAgent --> Advisor
+    ResizeAgent --> Pricing
+    MonitorAgent --> Monitor
+    MonitorAgent --> Compute
+    MonitorAgent --> Advisor
+    
+    Agents -->|"telemetry"| AppInsights
+    AppInsights --> LAW
+    LAW --- AMPLS
+    
+    ACR -->|"image pull"| AgentRuntime
+```
+
+---
+
+## How the Systems Connect
+
+### 1. GitHub Copilot → Agent Development
+
+GitHub Copilot acts as the development accelerator. It was used to:
+- Scaffold agent code, Dockerfiles, and manifests
+- Debug Azure SDK issues (e.g., ISO 8601 time grain vs Python `timedelta`)
+- Automate RBAC role assignments and container builds
+- Generate the evaluation notebook
+
+The `.github/copilot-instructions.md` file captures all lessons learned, so Copilot retains context across sessions.
+
+### 2. Azure AI Foundry → Agent Hosting
+
+Foundry provides the managed platform for running agents:
+- **Project** — logical container for agents, models, and connections
+- **Hosted Agent Runtime** — pulls container images from ACR, manages lifecycle
+- **Model Deployments** — GPT-4.1-mini used by agents for reasoning
+- **Managed Identity** — each agent version gets a unique identity for RBAC
+
+### 3. Hosted Agents → Tool Execution (MCP Pattern)
+
+Each agent is a Python container that implements the **Responses Protocol**:
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ Subscription A (Observability Owner)                                │
-│                                                                     │
-│  rg-observability-eastus2                                           │
-│  ├── Log Analytics Workspace (log-foundry-mcp-eastus2)              │
-│  ├── Application Insights (appi-foundry-mcp-eastus2)                │
-│  └── Data Collection Endpoint (dce-foundry-mcp-eastus2)             │
-└─────────────────────────────────────────────────────────────────────┘
-        │
-        │  Resource IDs shared via outputs/subA-outputs.json
-        ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ Subscription B (Workload Owner)                                     │
-│                                                                     │
-│  AMPLS + Private Endpoint → connects to Sub A resources             │
-│  Azure Microsoft Foundry Project → sends telemetry via AMPLS               │
-└─────────────────────────────────────────────────────────────────────┘
+User Prompt → Foundry Runtime → Agent Container → LLM (tool selection)
+                                       ↓
+                              Execute Tool (Azure SDK call)
+                                       ↓
+                              Tool Result → LLM → Final Response
 ```
 
-## Prerequisites
+Tools are Python functions that call Azure Resource Manager APIs using the agent's managed identity. This is the **MCP connection pattern** — the agent connects to external services (Monitor, Compute, Advisor) as tool backends, authenticated via `DefaultAzureCredential`.
 
-- [Azure CLI](https://aka.ms/installazurecli) (v2.60+)
-- [Azure Developer CLI (azd)](https://aka.ms/azure-dev/install)
-- PowerShell 7+ (`pwsh`)
-- Owner or Contributor role on both subscriptions
-- Both subscriptions must be in the same Azure AD tenant
+### 4. RBAC → Secure Access
 
-## Quick Start
+Each agent version gets a new managed identity. Required roles:
 
-### Step 1: Deploy Observability Resources (Subscription A)
+| Role | Scope | What it enables |
+|------|-------|-----------------|
+| `Reader` | Subscription | List VMs, SKUs, Advisor recommendations |
+| `Monitoring Reader` | Subscription | Query Azure Monitor metrics data-plane |
+| `Cognitive Services User` | AI Services account | Foundry API access (if calling other agents) |
 
-```powershell
-# Login to your tenant
-az login --tenant <your-tenant-id>
+### 5. AMPLS → Private Observability
 
-# Run the deployment script
-pwsh -ExecutionPolicy Bypass -File ./scripts/deploy-subA.ps1 -SubA "<subscription-a-id>" -Location "eastus2"
-```
+Azure Monitor Private Link Scope ensures telemetry from agents flows over private endpoints, not the public internet. The Bicep templates in `infra/` deploy this cross-subscription.
 
-This deploys:
-- **Log Analytics Workspace** — centralized log storage
-- **Application Insights** (workspace-based) — APM telemetry
-- **Data Collection Endpoint** — ingestion endpoint for AMPLS
-
-Outputs are saved to `./outputs/subA-outputs.json`. Share the three resource IDs with the Sub B owner:
-- `workspaceId`
-- `appInsightsId`
-- `dceId`
-
-### Step 2: Deploy AMPLS & Private Endpoint (Subscription B)
-
-> ⚠️ This step is performed by the Subscription B owner using `deploy-subB.ps1` (not included yet — pending Sub B setup).
-
-The Sub B owner will:
-1. Create an Azure Monitor Private Link Scope (AMPLS)
-2. Link Sub A's workspace, App Insights, and DCE to the AMPLS
-3. Create a private endpoint in their VNet pointing to the AMPLS
-
-### Step 3: Provision Azure Microsoft Foundry Project
-
-```powershell
-cd foundry-project
-
-# Initialize from the azd starter template
-azd init -t https://github.com/Azure-Samples/azd-ai-starter-basic -e <project-name> --no-prompt
-
-# Set location and enable hosted agents
-azd env set AZURE_LOCATION eastus2
-azd env set ENABLE_HOSTED_AGENTS true
-
-# Provision (takes ~5 minutes)
-azd provision --no-prompt
-```
-
-This creates:
-- Microsoft Foundry account + project
-- Container Registry (for hosted agents)
-- Capability host (agent runtime)
-- Application Insights (project-level)
-- Log Analytics workspace (project-level)
-
-### Step 4: Verify End-to-End
-
-Once Sub B deploys the AMPLS private endpoint:
-1. Go to **Azure Portal → AMPLS resource → Private endpoint connections**
-2. Verify the connection is auto-approved (same tenant)
-3. Deploy a test agent to the Foundry project and confirm traces flow to Sub A's App Insights
-
-## Repository Structure
-
-```
-ampls-mcp-test/
-├── README.md                        # This file
-├── .github/
-│   └── copilot-instructions.md     # Lessons learned & patterns for hosted agents
-├── infra/
-│   ├── subA-observability.bicep     # Subscription-level Bicep (creates RG + resources)
-│   └── modules/
-│       └── observability.bicep      # Resource-group-level module
-├── scripts/
-│   └── deploy-subA.ps1              # Deployment script for Sub A
-├── foundry-project/
-│   └── README.md                    # Instructions for Foundry project setup
-├── agent-monitor-recommendations/   # Hosted agent: Azure Monitor & Advisor data collector
-│   ├── main.py                      # 5 tools (list_vms, get_monitor_metrics, etc.)
-│   ├── Dockerfile                   # Python 3.12-slim container
-│   ├── requirements.txt
-│   └── README.md
-├── agent-vm-resize-analyst/         # Hosted agent: VM resize analysis & cost comparison
-│   ├── main.py                      # 6 tools (list_vms, get_monitor_metrics, get_advisor_recommendations, get_available_vm_skus, get_vm_resize_options, estimate_cost_comparison)
-│   ├── Dockerfile
-│   ├── agent.yaml                   # Hosted agent config (CPU/memory)
-│   ├── agent.manifest.yaml          # Foundry registration manifest
-│   ├── .foundry/agent-metadata.yaml # Dev environment metadata
-│   ├── .env.example
-│   └── README.md
-├── agent-evaluation-checklist.ipynb  # Reusable Jupyter notebook for agent validation
-├── outputs/
-│   └── .gitkeep                     # Placeholder (actual outputs are gitignored)
-└── .gitignore
-```
+---
 
 ## Hosted Agents
 
-This repo includes two Microsoft Foundry hosted agents that work together to help users analyze and resize VMs:
+### 🤖 monitor-recommendations-agent (v4)
 
-### agent-monitor-recommendations (v4)
-Collects Azure Monitor metrics, activity logs, alerts, and Advisor recommendations. Deployed as a hosted agent container in ACR.
+Collects raw Azure infrastructure data — metrics, alerts, activity logs, and Advisor recommendations.
 
-**Tools:** `list_vms`, `get_monitor_metrics`, `get_monitor_alerts`, `get_activity_log`, `get_advisor_recommendations`
+| Tool | Description |
+|------|-------------|
+| `list_vms` | List VMs in subscription/resource group |
+| `get_monitor_metrics` | Query CPU, memory, disk metrics |
+| `get_monitor_alerts` | Active alerts for a resource |
+| `get_activity_log` | Recent management operations |
+| `get_advisor_recommendations` | Cost/performance/security recommendations |
 
-### agent-vm-resize-analyst (v2)
-Analyzes VM metrics and recommendations to provide resize options with cost comparisons. Embeds monitor tools directly for self-contained operation.
+### 🤖 vm-resize-analyst-agent (v2)
 
-**Tools:** `list_vms`, `get_monitor_metrics`, `get_advisor_recommendations`, `get_available_vm_skus`, `get_vm_resize_options`, `estimate_cost_comparison`
+Analyzes metrics and recommendations to give users actionable resize options with cost comparisons.
 
-### Deployment
+| Tool | Description |
+|------|-------------|
+| `list_vms` | List VMs with size and location |
+| `get_monitor_metrics` | Historical CPU/memory utilization |
+| `get_advisor_recommendations` | Right-size recommendations |
+| `get_available_vm_skus` | Available sizes in a region |
+| `get_vm_resize_options` | Valid resize targets for a specific VM |
+| `estimate_cost_comparison` | Price comparison between two SKUs |
 
-```powershell
-# Build and push to ACR
-az acr build --registry cruxluiilsxlu4w --image <agent-name>:latest ./agent-<folder>/
+### Why Two Agents?
 
-# Register/update agent version via Python SDK (see agent README for details)
-```
+| Pattern | Pros | Cons |
+|---------|------|------|
+| Single agent with all tools | Simpler deployment, one identity | Larger container, all-or-nothing updates |
+| Multi-agent (separate containers) | Independent scaling, focused prompts | Inter-agent calls are complex in Foundry |
+| Multi-agent (embedded tools) ✅ | Independent agents, no call overhead | Some tool duplication |
 
-### Required RBAC for Agent Identities
-
-| Role | Scope | Purpose |
-|------|-------|---------|
-| Reader | Subscription | List VMs, SKUs, Advisor recommendations |
-| Monitoring Reader | Subscription | Query Azure Monitor metrics |
-| Azure AI Developer | AI Services account | Agent-to-agent communication (if needed) |
-| Cognitive Services User | AI Services account | Foundry API access |
+We chose **embedded tools** — each agent carries its own tools rather than calling the other. This avoids the complexity of inter-agent HTTP calls in the current Foundry SDK.
 
 ---
 
 ## Agent Evaluation Checklist
 
-A reusable Jupyter notebook (`agent-evaluation-checklist.ipynb`) to validate any hosted agent across 5 areas:
+A reusable Jupyter notebook (`agent-evaluation-checklist.ipynb`) that validates any hosted agent across 5 areas:
 
-| Section | What it tests |
-|---------|---------------|
-| 1️⃣ Infrastructure | ACR image exists, agent registered, version active |
-| 2️⃣ Identity & RBAC | Managed identity has all required role assignments |
-| 3️⃣ Tool Connectivity | Each tool's backend API (Compute, Monitor, Advisor, Pricing) is reachable |
-| 4️⃣ Tool Selection | LLM picks the correct tool for test prompts (accuracy %) |
-| 5️⃣ End-to-End | Full agent response via deployed endpoint |
+| Section | Tests | Example Output |
+|---------|-------|----------------|
+| 1️⃣ Infrastructure | ACR image, agent registration, version status | ✅ Agent version active — v2 status=active |
+| 2️⃣ Identity & RBAC | Managed identity, role assignments | ✅ RBAC: Monitoring Reader — scope=subscription |
+| 3️⃣ Tool Connectivity | Live API calls to each backend | ✅ Compute API accessible — 1161 VM sizes |
+| 4️⃣ Tool Selection | LLM picks correct tool per prompt | ✅ Tool selection accuracy: 6/6 (100%) |
+| 5️⃣ End-to-End | Full agent loop: prompt → tool → response | ✅ Response: 5 VMs found, 577 chars |
 
-### Running the Evaluation Locally
+### Running Locally
 
 ```powershell
 # Install dependencies
 pip install jupyter azure-identity azure-ai-projects azure-mgmt-compute azure-mgmt-monitor azure-mgmt-advisor
 
-# Make sure you're logged in
+# Login to Azure
 az login
 
-# Option 1: Run in browser
+# Option 1: Interactive in browser
 python -m notebook agent-evaluation-checklist.ipynb
 
-# Option 2: Run headless and get output
+# Option 2: Headless execution
 python -m nbconvert --to notebook --execute agent-evaluation-checklist.ipynb --output results.ipynb
 ```
 
-### Customizing for a Different Agent
+### Customizing for Your Agent
 
-Edit the `AGENT_CONFIG` cell at the top of the notebook:
-- `agent_name` — your agent's registered name
-- `expected_tools` — list of tool function names
-- `required_roles` — RBAC roles to validate
-- `tool_selection_tests` — (prompt, expected_tool) pairs
+Edit the `AGENT_CONFIG` cell:
+```python
+AGENT_CONFIG = {
+    "agent_name": "your-agent-name",
+    "expected_tools": ["tool1", "tool2"],
+    "required_roles": [{"role": "Reader", "scope": "subscription"}],
+    "tool_selection_tests": [
+        ("Your test prompt", "expected_tool_name"),
+    ],
+}
+```
 
 ---
 
-## Customization
+## Repository Structure
 
-Edit the default parameters in `infra/subA-observability.bicep`:
+```
+ampls-mcp-test/
+├── README.md                         # This file
+├── .github/
+│   └── copilot-instructions.md      # Lessons learned & patterns (Copilot context)
+│
+├── agent-monitor-recommendations/    # Agent 1: Data collection
+│   ├── main.py                       # Tool implementations
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── README.md
+│
+├── agent-vm-resize-analyst/          # Agent 2: Analysis & recommendations
+│   ├── main.py                       # 6 tools with Azure SDK calls
+│   ├── Dockerfile
+│   ├── agent.yaml                    # CPU/memory config
+│   ├── agent.manifest.yaml           # Foundry registration manifest
+│   ├── .foundry/agent-metadata.yaml
+│   ├── .env.example
+│   └── README.md
+│
+├── agent-evaluation-checklist.ipynb   # Reusable agent validation notebook
+│
+├── infra/                            # AMPLS observability infrastructure
+│   ├── subA-observability.bicep
+│   └── modules/
+│       └── observability.bicep
+│
+├── scripts/
+│   └── deploy-subA.ps1              # Subscription A deployment
+│
+├── foundry-project/
+│   └── README.md                    # Foundry project setup guide
+│
+└── outputs/
+    └── .gitkeep
+```
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `location` | `eastus2` | Azure region |
-| `rgName` | `rg-observability-eastus2` | Resource group name |
-| `workspaceName` | `log-foundry-mcp-eastus2` | Log Analytics workspace name |
-| `appInsightsName` | `appi-foundry-mcp-eastus2` | Application Insights name |
-| `dceName` | `dce-foundry-mcp-eastus2` | Data Collection Endpoint name |
+---
 
-## Cleanup
+## Quick Start
+
+### Prerequisites
+
+- [Azure CLI](https://aka.ms/installazurecli) (v2.60+)
+- [Azure Developer CLI (azd)](https://aka.ms/azure-dev/install)
+- Python 3.10+
+- Owner or Contributor role on your Azure subscription
+
+### 1. Provision Foundry Project
 
 ```powershell
-# Remove Sub A observability resources
-az group delete --name rg-observability-eastus2 --yes --no-wait
-
-# Remove Foundry project (from the foundry-project directory)
-cd foundry-project && azd down --force --purge
+cd foundry-project
+azd init -t https://github.com/Azure-Samples/azd-ai-starter-basic -e my-project --no-prompt
+azd env set AZURE_LOCATION eastus2
+azd env set ENABLE_HOSTED_AGENTS true
+azd provision --no-prompt
 ```
+
+### 2. Build & Deploy an Agent
+
+```powershell
+# Build container image
+az acr build --registry <your-acr> --image vm-resize-analyst-agent:latest ./agent-vm-resize-analyst/
+
+# Register agent version (Python)
+python -c "
+from azure.ai.projects import AIProjectClient
+from azure.identity import DefaultAzureCredential
+
+client = AIProjectClient(endpoint='<your-project-endpoint>', credential=DefaultAzureCredential())
+client.agents.create_version(
+    agent_name='vm-resize-analyst-agent',
+    headers={'Foundry-Features': 'HostedAgents=V1Preview'},
+    definition={
+        'kind': 'hosted',
+        'container_protocol_versions': [{'protocol': 'responses', 'version': '1.0.0'}],
+        'cpu': '0.5', 'memory': '1Gi',
+        'image': '<your-acr>.azurecr.io/vm-resize-analyst-agent:latest',
+        'environment_variables': {'AZURE_AI_MODEL_DEPLOYMENT_NAME': 'gpt-4.1-mini'},
+    }
+)
+"
+```
+
+### 3. Assign RBAC
+
+```powershell
+# Get the agent's principal_id from the version, then:
+az role assignment create --assignee "<principal_id>" --role "Reader" --scope "/subscriptions/<sub_id>"
+az role assignment create --assignee "<principal_id>" --role "Monitoring Reader" --scope "/subscriptions/<sub_id>"
+```
+
+### 4. Validate with Evaluation Notebook
+
+```powershell
+pip install jupyter azure-identity azure-ai-projects azure-mgmt-compute azure-mgmt-monitor azure-mgmt-advisor
+python -m notebook agent-evaluation-checklist.ipynb
+```
+
+---
+
+## Lessons Learned
+
+Key gotchas documented in `.github/copilot-instructions.md`:
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| Metrics query fails | `interval=timedelta(hours=1)` | Use ISO 8601: `"PT1H"` |
+| Agent can't list VMs | Missing `Reader` role | Assign on subscription scope |
+| Agent can't query metrics | `Reader` ≠ metrics access | Add `Monitoring Reader` |
+| New version, same error | Each version = new identity | Re-assign RBAC to new principal_id |
+| Inter-agent calls fail | Hosted agents aren't "applications" | Embed tools directly |
+| `preview_feature_required` | Missing header | Add `Foundry-Features: HostedAgents=V1Preview` |
+
+---
+
+## Deploy Observability (AMPLS)
+
+For private telemetry routing across subscriptions:
+
+```powershell
+# Deploy Log Analytics + App Insights + DCE
+pwsh -ExecutionPolicy Bypass -File ./scripts/deploy-subA.ps1 -SubA "<subscription-a-id>" -Location "eastus2"
+```
+
+See `infra/` for Bicep templates and `foundry-project/README.md` for project setup.
+
+---
 
 ## License
 
