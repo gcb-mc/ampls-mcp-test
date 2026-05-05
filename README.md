@@ -1,6 +1,6 @@
-# AMPLS + Azure AI Foundry Observability Setup
+# AMPLS + Microsoft Foundry Observability Setup
 
-This repo provides Bicep templates and scripts to deploy a cross-subscription observability stack with Azure Monitor Private Link Scope (AMPLS) for Azure AI Foundry projects.
+This repo provides Bicep templates and scripts to deploy a cross-subscription observability stack with Azure Monitor Private Link Scope (AMPLS) for Foundry projects.
 
 ## Architecture Overview
 
@@ -20,7 +20,7 @@ This repo provides Bicep templates and scripts to deploy a cross-subscription ob
 │ Subscription B (Workload Owner)                                     │
 │                                                                     │
 │  AMPLS + Private Endpoint → connects to Sub A resources             │
-│  Azure AI Foundry Project → sends telemetry via AMPLS               │
+│  Azure Microsoft Foundry Project → sends telemetry via AMPLS               │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -63,7 +63,7 @@ The Sub B owner will:
 2. Link Sub A's workspace, App Insights, and DCE to the AMPLS
 3. Create a private endpoint in their VNet pointing to the AMPLS
 
-### Step 3: Provision Azure AI Foundry Project
+### Step 3: Provision Azure Microsoft Foundry Project
 
 ```powershell
 cd foundry-project
@@ -80,7 +80,7 @@ azd provision --no-prompt
 ```
 
 This creates:
-- AI Foundry account + project
+- Microsoft Foundry account + project
 - Container Registry (for hosted agents)
 - Capability host (agent runtime)
 - Application Insights (project-level)
