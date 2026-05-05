@@ -47,9 +47,12 @@ The agent starts on `http://localhost:8088`. Send requests to `POST http://local
 
 | Variable | Description |
 |----------|-------------|
-| `FOUNDRY_PROJECT_ENDPOINT` | Your Foundry project endpoint URL |
+| `FOUNDRY_PROJECT_ENDPOINT` | Your Foundry project endpoint URL (auto-injected in hosted mode) |
 | `AZURE_AI_MODEL_DEPLOYMENT_NAME` | Model deployment name (e.g., `gpt-4.1-mini`) |
 | `AZURE_SUBSCRIPTION_ID` | Subscription to query for recommendations |
+| `AZURE_TENANT_ID` | Entra tenant ID (for OBO flow) |
+| `AZURE_CLIENT_ID` | App registration client ID (for OBO flow) |
+| `AZURE_CLIENT_SECRET` | App registration client secret (for OBO flow) |
 
 ### Deploy to Foundry
 
@@ -160,10 +163,138 @@ RBAC propagation takes 2–5 minutes. Then test in the [Foundry Playground](http
 ## Architecture
 
 ```
-User → Foundry Agent Service → This Agent (container)
-                                    ├── Azure Advisor API (recommendations)
-                                    ├── Azure Monitor API (metrics, alerts)
-                                    └── Azure Activity Log API (events)
+User → Caller App → Foundry Agent Service → This Agent (container)
+                         │                       ├── Azure Advisor API (OBO credential)
+                         │                       ├── Azure Monitor API (OBO credential)
+                         │                       └── Azure Activity Log API (OBO credential)
+                         │
+                         └── x-client-authorization: Bearer <user-token>
 ```
 
-The agent uses `DefaultAzureCredential` for authentication, supporting managed identity in production and Azure CLI/VS Code credentials locally.
+The agent uses **On-Behalf-Of (OBO) flow** to access Azure APIs as the calling user. The caller's token is passed via the `x-client-authorization` header and exchanged for a downstream token scoped to `https://management.azure.com/.default`.
+
+## Caller Identity Pass-Through (OBO)
+
+This agent requires the caller to pass their identity token so it accesses Azure APIs with the caller's permissions (not a shared managed identity).
+
+### How It Works
+
+1. The calling application authenticates the user and obtains a token
+2. The caller includes `x-client-authorization: Bearer <user-token>` in the request to the Foundry agent
+3. The agent extracts the token from `context.client_headers` (the platform forwards `x-client-*` prefixed headers)
+4. The agent uses `OnBehalfOfCredential` to exchange the user token for a downstream Azure Management token
+5. Azure Monitor/Advisor APIs are called with the user's delegated identity
+
+### Entra App Registration Setup
+
+You need an Entra ID (Azure AD) app registration for the OBO exchange:
+
+#### Step 1: Create the App Registration
+
+```bash
+az ad app create --display-name "monitor-recommendations-agent-obo"
+```
+
+Note the `appId` (client ID) from the output.
+
+#### Step 2: Create a Client Secret
+
+```bash
+az ad app credential reset --id <app-id> --display-name "obo-secret"
+```
+
+Note the `password` (client secret) from the output.
+
+#### Step 3: Add API Permissions
+
+The app needs delegated permission to Azure Management:
+
+```bash
+# Azure Service Management - user_impersonation
+az ad app permission add \
+  --id <app-id> \
+  --api 797f4846-ba00-4fd7-ba43-dac1f8f63013 \
+  --api-permissions 41094075-9dad-400e-a0bd-54e686782033=Scope
+```
+
+Grant admin consent:
+
+```bash
+az ad app permission admin-consent --id <app-id>
+```
+
+#### Step 4: Expose an API (optional, for first-party callers)
+
+If you want callers to request a token scoped to your agent app:
+
+```bash
+az ad app update --id <app-id> \
+  --identifier-uris "api://<app-id>"
+
+az ad app permission add \
+  --id <caller-app-id> \
+  --api <app-id> \
+  --api-permissions <scope-id>=Scope
+```
+
+#### Step 5: Configure Environment
+
+Set the following in your agent's environment variables (in Foundry deployment or `.env` locally):
+
+| Variable | Value |
+|----------|-------|
+| `AZURE_TENANT_ID` | Your Entra tenant ID |
+| `AZURE_CLIENT_ID` | The app registration's client ID |
+| `AZURE_CLIENT_SECRET` | The client secret created in Step 2 |
+
+### Calling the Agent with OBO
+
+When invoking the agent, the caller must include the `x-client-authorization` header:
+
+```python
+import requests
+
+# The user's access token (obtained via MSAL, az cli, etc.)
+user_token = "<user-bearer-token>"
+
+response = requests.post(
+    "https://<foundry-endpoint>/agents/<agent-name>/responses",
+    headers={
+        "Authorization": "Bearer <platform-auth-token>",
+        "x-client-authorization": f"Bearer {user_token}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "input": "What are my Azure Advisor recommendations?",
+        "session": {"id": "test-session"},
+    }
+)
+```
+
+> **Important:** The `Authorization` header authenticates to Foundry. The `x-client-authorization` header carries the user's token for downstream Azure API access.
+
+### Token Requirements
+
+The user token passed in `x-client-authorization` must:
+- Be a valid Entra ID access token
+- Be scoped to the agent's app registration (`api://<client-id>/.default`) OR to `https://management.azure.com/.default`
+- The user must have appropriate RBAC on the target subscription (Monitoring Reader, Reader)
+
+### Alternative: Pattern B (Invocations Protocol)
+
+If you need full `Request` object access (e.g., to read the standard `Authorization` header directly), you can switch to the invocations protocol:
+
+```python
+from agent_framework_foundry_hosting import InvocationsHostServer
+from starlette.requests import Request
+
+app = InvocationsHostServer()
+
+@app.invoke_handler
+async def handle_invoke(request: Request):
+    # Full access to all headers
+    auth_header = request.headers.get("authorization")
+    # ... process request with full control
+```
+
+This requires changing `container_protocol_versions` to `invocations` in the agent registration and gives you complete control over request handling.

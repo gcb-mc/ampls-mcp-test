@@ -3,4 +3,5 @@ agent-framework-foundry-hosting
 azure-identity
 azure-mgmt-advisor
 azure-mgmt-monitor
+msal
 python-dotenv

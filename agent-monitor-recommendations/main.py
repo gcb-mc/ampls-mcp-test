@@ -2,12 +2,13 @@
 
 import os
 import json
+import contextvars
 from datetime import datetime, timedelta, timezone
 
 from agent_framework import Agent, tool
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_foundry_hosting import ResponsesHostServer
-from azure.identity import DefaultAzureCredential
+from azure.identity import DefaultAzureCredential, OnBehalfOfCredential
 from azure.mgmt.advisor import AdvisorManagementClient
 from azure.mgmt.monitor import MonitorManagementClient
 from dotenv import load_dotenv
@@ -18,7 +19,52 @@ from typing_extensions import Annotated
 load_dotenv(override=False)
 
 SUBSCRIPTION_ID = os.environ.get("AZURE_SUBSCRIPTION_ID", "")
-credential = DefaultAzureCredential()
+AZURE_TENANT_ID = os.environ.get("AZURE_TENANT_ID", "")
+AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID", "")
+AZURE_CLIENT_SECRET = os.environ.get("AZURE_CLIENT_SECRET", "")
+
+# ContextVar to propagate caller token from server to tool functions
+_caller_token_var: contextvars.ContextVar[str] = contextvars.ContextVar("caller_token")
+
+
+def _get_obo_credential() -> OnBehalfOfCredential:
+    """Create an OnBehalfOfCredential using the caller's token from the contextvar."""
+    user_assertion = _caller_token_var.get(None)
+    if not user_assertion:
+        raise RuntimeError(
+            "No caller token available. The caller must send an "
+            "'x-client-authorization: Bearer <token>' header."
+        )
+    return OnBehalfOfCredential(
+        tenant_id=AZURE_TENANT_ID,
+        client_id=AZURE_CLIENT_ID,
+        client_secret=AZURE_CLIENT_SECRET,
+        user_assertion=user_assertion,
+    )
+
+
+class OBOResponsesHostServer(ResponsesHostServer):
+    """Subclass that extracts caller token from x-client-authorization header."""
+
+    async def _handle_response(self, request, context, cancellation_signal=None):
+        # Extract caller token from x-client-* headers
+        # The platform forwards headers prefixed with "x-client-" to context.client_headers
+        auth_header = context.client_headers.get("x-client-authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token_value = auth_header[7:]  # Strip "Bearer " prefix
+        else:
+            token_value = auth_header
+
+        if not token_value:
+            raise ValueError(
+                "Missing caller token. Include 'x-client-authorization: Bearer <token>' header."
+            )
+
+        token_reset = _caller_token_var.set(token_value)
+        try:
+            return await super()._handle_response(request, context, cancellation_signal)
+        finally:
+            _caller_token_var.reset(token_reset)
 
 
 @tool(approval_mode="never_require")
@@ -32,7 +78,7 @@ def get_advisor_recommendations(
 ) -> str:
     """Get Azure Advisor recommendations for the configured subscription. Returns recommendations with impact, category, and suggested actions."""
     try:
-        advisor_client = AdvisorManagementClient(credential, SUBSCRIPTION_ID)
+        advisor_client = AdvisorManagementClient(_get_obo_credential(), SUBSCRIPTION_ID)
         recommendations = []
 
         for rec in advisor_client.recommendations.list():
@@ -71,7 +117,7 @@ def get_monitor_alerts(
 ) -> str:
     """Get recent Azure Monitor alerts for the configured subscription."""
     try:
-        monitor_client = MonitorManagementClient(credential, SUBSCRIPTION_ID)
+        monitor_client = MonitorManagementClient(_get_obo_credential(), SUBSCRIPTION_ID)
         alerts = []
 
         # List alert rules
@@ -116,7 +162,7 @@ def get_monitor_metrics(
 ) -> str:
     """Get Azure Monitor metrics for a specific resource. Returns metric values over the specified time range."""
     try:
-        monitor_client = MonitorManagementClient(credential, SUBSCRIPTION_ID)
+        monitor_client = MonitorManagementClient(_get_obo_credential(), SUBSCRIPTION_ID)
 
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=time_range_hours)
@@ -172,12 +218,12 @@ def get_activity_log(
 ) -> str:
     """Get Azure Monitor activity log entries for the subscription. Useful for identifying recent changes, failures, or warnings."""
     try:
-        monitor_client = MonitorManagementClient(credential, SUBSCRIPTION_ID)
+        monitor_client = MonitorManagementClient(_get_obo_credential(), SUBSCRIPTION_ID)
 
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=time_range_hours)
 
-        filter_str = f"eventTimestamp ge '{start_time.isoformat()}' and eventTimestamp le '{end_time.isoformat()}'"
+        filter_str= f"eventTimestamp ge '{start_time.isoformat()}' and eventTimestamp le '{end_time.isoformat()}'"
         if resource_group:
             filter_str += f" and resourceGroupName eq '{resource_group}'"
 
@@ -250,7 +296,7 @@ def main():
         default_options={"store": False},
     )
 
-    server = ResponsesHostServer(agent)
+    server = OBOResponsesHostServer(agent)
     server.run()
 
 
