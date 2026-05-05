@@ -21,14 +21,14 @@ This repo is a **reference architecture** for building Microsoft Foundry hosted 
 
 | Agent | Version | Status | Principal ID | ACR Image |
 |-------|---------|--------|--------------|-----------|
-| `monitor-recommendations-agent` | v4 | active | `8e027320-ed3f-4887-9b00-fc58eba3df2f` | `cruxluiilsxlu4w.azurecr.io/monitor-recommendations-agent:latest` |
-| `vm-resize-analyst-agent` | v2 | active | `1c15064c-3475-40de-a568-fd3c51905094` | `cruxluiilsxlu4w.azurecr.io/vm-resize-analyst-agent:latest` |
+| `monitor-recommendations-agent` | v4 | active | `<monitor-agent-principal-id>` | `<your-acr>.azurecr.io/monitor-recommendations-agent:latest` |
+| `vm-resize-analyst-agent` | v2 | active | `<resize-agent-principal-id>` | `<your-acr>.azurecr.io/vm-resize-analyst-agent:latest` |
 
-**Project endpoint:** `https://ai-account-uxluiilsxlu4w.services.ai.azure.com/api/projects/ai-project-ampls-foundry-test02`  
-**Subscription:** `f6eb08ce-f112-4889-9891-829161ecbd66`  
-**Resource group:** `rg-ampls-foundry-test02`  
+**Project endpoint:** `https://<your-ai-account>.services.ai.azure.com/api/projects/<your-project-name>`  
+**Subscription:** `<subscription-a-id>`  
+**Resource group:** `<your-resource-group>`  
 **Model deployment:** `gpt-4.1-mini`  
-**ACR:** `cruxluiilsxlu4w`
+**ACR:** `<your-acr>`
 
 ---
 
@@ -57,10 +57,10 @@ version = client.agents.create_version(
         "container_protocol_versions": [{"protocol": "responses", "version": "1.0.0"}],
         "cpu": "0.5",
         "memory": "1Gi",
-        "image": "cruxluiilsxlu4w.azurecr.io/vm-resize-analyst-agent:latest",
+        "image": "<your-acr>.azurecr.io/vm-resize-analyst-agent:latest",
         "environment_variables": {
             "AZURE_AI_MODEL_DEPLOYMENT_NAME": "gpt-4.1-mini",
-            "AZURE_SUBSCRIPTION_ID": "f6eb08ce-f112-4889-9891-829161ecbd66",
+            "AZURE_SUBSCRIPTION_ID": "<subscription-a-id>",
         },
     },
 )

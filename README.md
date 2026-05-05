@@ -273,6 +273,20 @@ ampls-mcp-test/
 - Python 3.10+
 - Owner or Contributor role on your Azure subscription
 
+### Replace Placeholders
+
+Before deploying, replace these placeholders throughout the repo with your actual values:
+
+| Placeholder | Description |
+|-------------|-------------|
+| `<subscription-a-id>` | Your Azure subscription ID |
+| `<your-acr>` | Azure Container Registry name (e.g., `myregistry`) |
+| `<your-ai-account>` | Foundry AI account name (appears in project endpoint URL) |
+| `<your-project-name>` | Foundry project name |
+| `<your-resource-group>` | Resource group for Foundry resources |
+| `<monitor-agent-principal-id>` | Principal ID of the monitor-recommendations-agent version |
+| `<resize-agent-principal-id>` | Principal ID of the vm-resize-analyst-agent version |
+
 ### 1. Provision Foundry Project
 
 ```powershell

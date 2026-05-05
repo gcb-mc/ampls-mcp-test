@@ -37,7 +37,7 @@ The agent's managed identity (principal ID from Foundry) needs:
 ```bash
 # After deploying the agent, get its principal_id from the version details, then:
 PRINCIPAL_ID="<agent-principal-id>"
-SUB_ID="f6eb08ce-f112-4889-9891-829161ecbd66"
+SUB_ID="<subscription-a-id>"
 
 az role assignment create --assignee "$PRINCIPAL_ID" --role "Reader" --scope "/subscriptions/$SUB_ID"
 az role assignment create --assignee "$PRINCIPAL_ID" --role "Monitoring Reader" --scope "/subscriptions/$SUB_ID"
@@ -45,11 +45,21 @@ az role assignment create --assignee "$PRINCIPAL_ID" --role "Monitoring Reader" 
 
 > **Note:** `Monitoring Reader` is required to access Azure Monitor metrics data-plane. `Reader` alone is not sufficient for metric queries.
 
+## Placeholders
+
+Replace these values before deploying:
+
+| Placeholder | Description |
+|-------------|-------------|
+| `<subscription-a-id>` | Your Azure subscription ID |
+| `<your-acr>` | Your ACR name (e.g., `myregistry`) |
+| `<agent-principal-id>` | Principal ID from `create_version()` output |
+
 ## Deployment
 
 ```bash
 # 1. Build container
-az acr build --registry cruxluiilsxlu4w --image vm-resize-analyst-agent:latest .
+az acr build --registry <your-acr> --image vm-resize-analyst-agent:latest .
 
 # 2. Create/update agent version in Foundry (via SDK or CLI)
 # The agent will pull the :latest image on version creation
