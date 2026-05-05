@@ -9,6 +9,7 @@ from agent_framework.foundry import FoundryChatClient
 from agent_framework_foundry_hosting import ResponsesHostServer
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.advisor import AdvisorManagementClient
+from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.monitor import MonitorManagementClient
 from dotenv import load_dotenv
 from pydantic import Field
@@ -209,6 +210,59 @@ def get_activity_log(
         return f"Error fetching activity logs: {str(e)}"
 
 
+@tool(approval_mode="never_require")
+def list_vms(
+    resource_group: Annotated[
+        str,
+        Field(
+            description="Optional resource group name to filter VMs. Leave empty to list all VMs in the subscription."
+        ),
+    ] = "",
+) -> str:
+    """List virtual machines in the subscription (or a specific resource group). Returns VM name, resource group, location, size, OS type, power state, and resource ID."""
+    try:
+        compute_client = ComputeManagementClient(credential, SUBSCRIPTION_ID)
+
+        if resource_group:
+            vms_iter = compute_client.virtual_machines.list(resource_group)
+        else:
+            vms_iter = compute_client.virtual_machines.list_all()
+
+        vm_list = []
+        for vm in vms_iter:
+            # Extract resource group from the resource ID
+            rg = vm.id.split("/resourceGroups/")[1].split("/")[0] if vm.id else "N/A"
+
+            vm_info = {
+                "name": vm.name,
+                "resource_group": rg,
+                "location": vm.location,
+                "vm_size": vm.hardware_profile.vm_size if vm.hardware_profile else "N/A",
+                "os_type": vm.storage_profile.os_disk.os_type if vm.storage_profile and vm.storage_profile.os_disk else "N/A",
+                "resource_id": vm.id,
+            }
+
+            # Get power state via instance view if available
+            if vm.instance_view and vm.instance_view.statuses:
+                power_states = [s.display_status for s in vm.instance_view.statuses if s.code and s.code.startswith("PowerState/")]
+                vm_info["power_state"] = power_states[0] if power_states else "Unknown"
+            else:
+                vm_info["power_state"] = "Unknown (use Azure Portal or request instance view)"
+
+            vm_list.append(vm_info)
+
+            if len(vm_list) >= 50:
+                break
+
+        if not vm_list:
+            scope = f"resource group '{resource_group}'" if resource_group else f"subscription {SUBSCRIPTION_ID}"
+            return f"No virtual machines found in {scope}."
+
+        return json.dumps(vm_list, indent=2)
+    except Exception as e:
+        return f"Error listing VMs: {str(e)}"
+
+
 AGENT_INSTRUCTIONS = """You are an Azure Monitor Recommendations Agent. Your purpose is to analyze Azure Advisor recommendations, Monitor metrics, alerts, and activity logs for a subscription, and then provide actionable, prioritized recommendations.
 
 ## Your Capabilities:
@@ -216,6 +270,7 @@ AGENT_INSTRUCTIONS = """You are an Azure Monitor Recommendations Agent. Your pur
 2. **Monitor Alerts** - Check active alert rules and their status.
 3. **Resource Metrics** - Query specific resource metrics to identify performance issues.
 4. **Activity Logs** - Review recent errors and warnings in the activity log.
+5. **VM Inventory** - List virtual machines in the subscription or a specific resource group, including size, OS, and power state.
 
 ## How You Work:
 - When a user asks for recommendations, first gather data from Advisor and relevant Monitor sources.
@@ -231,6 +286,7 @@ AGENT_INSTRUCTIONS = """You are an Azure Monitor Recommendations Agent. Your pur
 - Always start by checking Advisor recommendations to get the broadest view.
 - Cross-reference with activity logs to identify active issues.
 - If the user asks about a specific resource, pull metrics for deeper analysis.
+- When the user asks about VMs or needs a resource ID, use list_vms first to enumerate available VMs.
 - Be concise but thorough. Group related recommendations together.
 - Highlight quick wins (low effort, high impact) separately from long-term improvements.
 - When you see cost optimization opportunities, include estimated savings if available.
@@ -247,7 +303,7 @@ def main():
     agent = Agent(
         client=client,
         instructions=AGENT_INSTRUCTIONS,
-        tools=[get_advisor_recommendations, get_monitor_alerts, get_monitor_metrics, get_activity_log],
+        tools=[get_advisor_recommendations, get_monitor_alerts, get_monitor_metrics, get_activity_log, list_vms],
         default_options={"store": False},
     )
 
