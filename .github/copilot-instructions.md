@@ -1,4 +1,4 @@
-# Copilot Instructions — Azure AI Foundry Hosted Agents
+# Copilot Instructions — Microsoft Foundry Hosted Agents
 
 > This file provides Copilot with persistent context about this repo's architecture, patterns, and gotchas.
 > Read this before making any changes to agent code, infrastructure, or deployment scripts.
@@ -7,13 +7,13 @@
 
 ## Repo Overview
 
-This repo is a **reference architecture** for building Azure AI Foundry hosted agents with MCP tool connections. It contains:
+This repo is a **reference architecture** for building Microsoft Foundry hosted agents with MCP tool connections. It contains:
 - Two hosted agents (`agent-monitor-recommendations`, `agent-vm-resize-analyst`) deployed as containers
 - AMPLS infrastructure for private observability
 - A reusable Jupyter evaluation notebook
 - Foundry project scaffolding
 
-**Key technologies:** Azure AI Foundry, Hosted Agents (Responses Protocol), Azure Monitor, Azure Compute, Azure Advisor, ACR, Managed Identity, RBAC, AMPLS
+**Key technologies:** Microsoft Foundry, Hosted Agents (Responses Protocol), Azure Monitor, Azure Compute, Azure Advisor, ACR, Managed Identity, RBAC, AMPLS
 
 ---
 
