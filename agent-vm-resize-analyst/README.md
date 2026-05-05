@@ -28,7 +28,8 @@ The agent's managed identity (principal ID from Foundry) needs:
 | Role | Scope | Purpose |
 |------|-------|---------|
 | **Reader** | Subscription | List VMs, read compute SKUs |
-| **Azure AI Developer** | AI Services account | Call the monitor agent via Foundry connected agents API |
+| **Azure AI Developer** | AI Services account | Model inference and Foundry project access |
+| **Cognitive Services User** | AI Services account | Data-plane access for `agents/read` — required to invoke connected agents via Foundry API |
 
 ```bash
 # After deploying the agent, get its principal_id from the version details, then:
@@ -38,6 +39,7 @@ AI_ACCOUNT="/subscriptions/$SUB_ID/resourceGroups/rg-ampls-foundry-test02/provid
 
 az role assignment create --assignee "$PRINCIPAL_ID" --role "Reader" --scope "/subscriptions/$SUB_ID"
 az role assignment create --assignee "$PRINCIPAL_ID" --role "Azure AI Developer" --scope "$AI_ACCOUNT"
+az role assignment create --assignee "$PRINCIPAL_ID" --role "Cognitive Services User" --scope "$AI_ACCOUNT"
 ```
 
 ## Deployment
