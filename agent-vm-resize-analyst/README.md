@@ -31,7 +31,8 @@ The agent's managed identity (principal ID from Foundry) needs:
 
 | Role | Scope | Purpose |
 |------|-------|---------|
-| **Reader** | Subscription | List VMs, read compute SKUs, query Monitor metrics |
+| **Reader** | Subscription | List VMs, read compute SKUs, read Advisor recommendations |
+| **Monitoring Reader** | Subscription | Query Azure Monitor metrics (CPU, memory, etc.) |
 
 ```bash
 # After deploying the agent, get its principal_id from the version details, then:
@@ -39,9 +40,10 @@ PRINCIPAL_ID="<agent-principal-id>"
 SUB_ID="f6eb08ce-f112-4889-9891-829161ecbd66"
 
 az role assignment create --assignee "$PRINCIPAL_ID" --role "Reader" --scope "/subscriptions/$SUB_ID"
+az role assignment create --assignee "$PRINCIPAL_ID" --role "Monitoring Reader" --scope "/subscriptions/$SUB_ID"
 ```
 
-> **Note:** The `Reader` role on the subscription is sufficient for all tools (list VMs, query metrics, read Advisor recommendations, list SKUs). No Cognitive Services roles are needed since this agent accesses Azure management APIs directly.
+> **Note:** `Monitoring Reader` is required to access Azure Monitor metrics data-plane. `Reader` alone is not sufficient for metric queries.
 
 ## Deployment
 
